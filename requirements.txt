@@ -1,0 +1,37 @@
+# Core ML
+torch>=2.0.0
+transformers>=4.40.0
+accelerate>=0.20.0
+
+# Pipecat voice framework
+pipecat-ai[google,silero,daily]>=0.0.40
+
+# Google Gemini LLM
+google-generativeai>=0.5.0
+
+# Audio processing
+soundfile
+sounddevice
+numpy
+
+# Gradio UI
+gradio>=4.0.0
+
+# Async and networking
+aiohttp
+websockets
+python-dotenv
+
+# CUDA compilation
+ninja
+triton>=2.2.0
+
+# Local STT (Whisper) - FREE!
+openai-whisper
+
+# Utilities
+tqdm
+rich
+
+# Optional: For benchmarking
+py-spy
