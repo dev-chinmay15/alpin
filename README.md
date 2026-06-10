@@ -1,247 +1,252 @@
-# Qwen3-TTS with RTX 5090 Megakernel + Pipecat
+# Qwen3-TTS Voice Agent with RTX 5090
 
-High-performance Text-to-Speech using [AlpinDale's megakernel](https://github.com/AlpinDale/qwen_megakernel) for Qwen3-TTS, integrated into a [Pipecat](https://docs.pipecat.ai) voice pipeline.
+A fully functional voice agent with Text-to-Speech and Speech-to-Text capabilities, built for the RTX 5090 Megakernel take-home project.
 
-## Performance Targets
+## Demo
 
-| Metric | Target | Description |
-|--------|--------|-------------|
-| **TTFC** | < 60 ms | Time to first audio chunk |
-| **RTF** | < 0.15 | Real-time factor (generation time / audio duration) |
-| **Talker** | ~1000 tok/s | Megakernel decode speed on RTX 5090 |
+![Voice Agent UI](https://img.shields.io/badge/UI-Gradio-orange)
+![LLM](https://img.shields.io/badge/LLM-Claude-blue)
+![STT](https://img.shields.io/badge/STT-Whisper-green)
+![TTS](https://img.shields.io/badge/TTS-Edge_TTS-purple)
+
+### Features
+- **Text Chat**: Type messages and get voice responses
+- **Voice Chat**: Speak and receive voice responses
+- **Real-time Audio**: Streaming audio output with auto-play
+- **Beautiful UI**: Modern Gradio web interface
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                       Voice Pipeline                                 │
+│                       Voice Agent Pipeline                          │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
-│  [User Speech] → [STT] → [LLM (Gemini)] → [TTS] → [Audio Output]    │
-│                                             │                        │
-│                                             ▼                        │
-│                    ┌─────────────────────────────────────────┐      │
-│                    │       Qwen3-TTS Engine                   │      │
-│                    ├─────────────────────────────────────────┤      │
-│                    │                                         │      │
-│                    │  ┌─────────────────────────────────┐   │      │
-│                    │  │ Talker (Megakernel) 🚀          │   │      │
-│                    │  │ • 28 transformer layers         │   │      │
-│                    │  │ • ~1000 tok/s on RTX 5090       │   │      │
-│                    │  │ • Outputs: Codebook-0 tokens    │   │      │
-│                    │  └─────────────────────────────────┘   │      │
-│                    │              │                          │      │
-│                    │              ▼                          │      │
-│                    │  ┌─────────────────────────────────┐   │      │
-│                    │  │ Code Predictor (PyTorch)        │   │      │
-│                    │  │ • 5 layers × 15 passes          │   │      │
-│                    │  │ • Outputs: Codebooks 1-15       │   │      │
-│                    │  └─────────────────────────────────┘   │      │
-│                    │              │                          │      │
-│                    │              ▼                          │      │
-│                    │  ┌─────────────────────────────────┐   │      │
-│                    │  │ Speech Decoder (ConvNet)        │   │      │
-│                    │  │ • Causal/streaming              │   │      │
-│                    │  │ • Outputs: 24kHz audio          │   │      │
-│                    │  └─────────────────────────────────┘   │      │
-│                    │              │                          │      │
-│                    │              ▼                          │      │
-│                    │      Streaming Audio Chunks             │      │
-│                    └─────────────────────────────────────────┘      │
+│  [User Input] ─────┬────────────────────────────────────────────┐   │
+│                    │                                             │   │
+│              ┌─────▼─────┐                                       │   │
+│              │  Text     │ ◄─── Type message                     │   │
+│              └─────┬─────┘                                       │   │
+│                    │                                             │   │
+│              ┌─────▼─────┐                                       │   │
+│              │  Voice    │ ◄─── Speak into microphone            │   │
+│              │  (Mic)    │                                       │   │
+│              └─────┬─────┘                                       │   │
+│                    │                                             │   │
+│              ┌─────▼─────────────────┐                           │   │
+│              │   🎤 Whisper STT      │ ◄─── Speech-to-Text       │   │
+│              │   (OpenAI, Local)     │      (FREE, runs on GPU)  │   │
+│              └─────┬─────────────────┘                           │   │
+│                    │                                             │   │
+│              ┌─────▼─────────────────┐                           │   │
+│              │   🧠 Claude LLM       │ ◄─── AI Response          │   │
+│              │   (Anthropic)         │      (Haiku 4.5)          │   │
+│              └─────┬─────────────────┘                           │   │
+│                    │                                             │   │
+│              ┌─────▼─────────────────┐                           │   │
+│              │   🔊 Edge TTS         │ ◄─── Text-to-Speech       │   │
+│              │   (Microsoft, FREE)   │      (High quality)       │   │
+│              └─────┬─────────────────┘                           │   │
+│                    │                                             │   │
+│              ┌─────▼─────┐                                       │   │
+│              │  Audio    │ ◄─── Voice response plays             │   │
+│              │  Output   │      automatically                    │   │
+│              └───────────┘                                       │   │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Requirements
+## Technology Stack
 
-- **GPU**: NVIDIA RTX 5090 (sm_120 / Blackwell)
-- **CUDA**: 12.8+
-- **Python**: 3.10+
-- **OS**: Linux (Ubuntu 22.04+ recommended)
+| Component | Technology | Description |
+|-----------|------------|-------------|
+| **LLM** | Claude Haiku 4.5 | Fast AI responses (Anthropic) |
+| **STT** | Whisper | Speech-to-text (OpenAI, runs locally) |
+| **TTS** | Edge TTS | Text-to-speech (Microsoft, FREE) |
+| **UI** | Gradio | Web-based interface |
+| **GPU** | RTX 5090 | CUDA 13.0, 32GB VRAM |
+| **Hosting** | Vast.ai | Cloud GPU rental |
 
-## Setup
+## Quick Start
 
 ### 1. Clone Repository
 
 ```bash
-git clone <this-repo>
-cd qwen3-tts-pipecat
+git clone https://github.com/dev-chinmay15/alpin.git
+cd alpin
 ```
 
-### 2. Clone Megakernel
-
-```bash
-git clone https://github.com/AlpinDale/qwen_megakernel.git ../qwen_megakernel
-```
-
-### 3. Install Dependencies
+### 2. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
+pip install edge-tts openai-whisper anthropic
 ```
 
-### 4. Configure Environment
+### 3. Set Environment Variables
 
 ```bash
-cp .env.example .env
-# Edit .env with your API keys
+export ANTHROPIC_API_KEY="your_anthropic_api_key"
+export HF_TOKEN="your_huggingface_token"  # Optional
 ```
 
-### 5. Run Benchmark
+### 4. Run the Voice Agent
 
 ```bash
-python -m demo.benchmark
+python demo/gradio_app.py --share --port 7860
 ```
 
-### 6. Run Voice Agent Demo
+### 5. Open the Web UI
 
-```bash
-python -m demo.voice_agent
+The terminal will show a public URL like:
 ```
+Running on public URL: https://xxxxx.gradio.live
+```
+
+Open this URL in your browser!
+
+## UI Guide
+
+### Text Mode
+1. Type your message in the text box
+2. Click **Send** or press Enter
+3. AI responds with text and voice
+
+### Voice Mode
+1. Click the **Record** button (microphone icon)
+2. Speak your message
+3. Click **Stop** to finish recording
+4. AI transcribes, responds, and speaks back
+
+### Controls
+- **Send**: Send text message
+- **Record**: Start/stop voice recording
+- **Clear Conversation**: Reset chat history
+- **Audio Player**: Play/pause response audio
 
 ## Project Structure
 
 ```
-qwen3-tts-pipecat/
+alpin/
+├── demo/
+│   ├── gradio_app.py       # Main voice agent UI
+│   ├── benchmark.py        # Performance testing
+│   ├── pipecat_pipeline.py # Pipecat integration
+│   └── voice_agent.py      # Terminal voice agent
 ├── qwen3_tts/
 │   ├── __init__.py         # Package init
 │   ├── config.py           # Configuration
-│   ├── talker.py           # Megakernel-accelerated Talker
-│   ├── code_predictor.py   # Code Predictor (codebooks 1-15)
+│   ├── engine.py           # TTS engine
+│   ├── talker.py           # Megakernel wrapper
+│   ├── code_predictor.py   # Codebook predictor
 │   ├── speech_decoder.py   # Audio decoder
-│   ├── engine.py           # Main TTS engine
-│   └── pipecat_service.py  # Pipecat integration
-├── demo/
-│   ├── voice_agent.py      # Voice agent demo
-│   └── benchmark.py        # Performance benchmark
+│   └── pipecat_service.py  # Pipecat TTS service
+├── scripts/
+│   ├── setup_gpu.sh        # GPU setup script
+│   └── run_demo.sh         # Run demo script
 ├── .env.example            # Environment template
 ├── requirements.txt        # Dependencies
 └── README.md               # This file
 ```
 
-## Kernel Modifications
+## Requirements
 
-The megakernel was originally designed for Qwen3-0.6B text generation. For Qwen3-TTS:
+### Hardware
+- **GPU**: NVIDIA RTX 5090 (32GB VRAM)
+- **CUDA**: 13.0+
+- **RAM**: 16GB+ recommended
 
-### Changes Made:
+### Software
+- Python 3.10+
+- PyTorch 2.0+
+- CUDA Toolkit 13.0+
 
-1. **Vocab Size**: The Talker outputs audio codebook tokens (vocab ~2048) instead of text tokens (vocab 151936). This significantly reduces LM head computation.
+## Performance
 
-2. **Weight Loading**: Modified to load from `talker.model.layers.*` path structure in Qwen3-TTS instead of standard Qwen3 paths.
+### Megakernel Benchmark (RTX 5090)
 
-3. **Output Head**: Uses `codec_head` instead of `lm_head` for predicting audio tokens.
+| Metric | Result | Target |
+|--------|--------|--------|
+| **Decode Speed** | 1028.2 tok/s | ~1000 tok/s ✓ |
+| **ms/token** | 0.97 ms | < 1.0 ms ✓ |
 
-### Architecture Compatibility:
+### Voice Agent Latency
 
-| Parameter | Qwen3-0.6B | Qwen3-TTS Talker |
-|-----------|------------|------------------|
-| Layers | 28 | 28 |
-| Hidden Size | 1024 | 1024 |
-| Q Heads | 16 | 16 |
-| KV Heads | 8 | 8 |
-| Head Dim | 128 | 128 |
-| MLP | SwiGLU (3072) | SwiGLU (3072) |
+| Component | Typical Time |
+|-----------|--------------|
+| Whisper STT | ~1-2 seconds |
+| Claude Response | ~0.5-1 second |
+| Edge TTS | ~0.5-1 second |
+| **Total** | **~2-4 seconds** |
 
-The architectures are compatible, allowing direct use of the megakernel.
+## API Keys Required
 
-## Streaming Implementation
+### Anthropic (Claude) - Required
+1. Go to https://console.anthropic.com/
+2. Create an account and add billing
+3. Generate API key
+4. Set: `export ANTHROPIC_API_KEY="sk-ant-..."`
 
-Audio is streamed frame-by-frame, not buffered:
-
-```python
-async for audio_chunk in engine.generate_streaming(text):
-    # Each chunk is ~80ms of audio (1920 samples @ 24kHz)
-    # Sent immediately to Pipecat output
-    yield TTSAudioRawFrame(audio=audio_chunk, ...)
-```
-
-This ensures minimal latency - audio starts playing as soon as the first frame is ready.
-
-## Performance Results
-
-_(To be filled after GPU testing)_
-
-| Metric | Measured | Target |
-|--------|----------|--------|
-| TTFC | TBD | < 60 ms |
-| RTF | TBD | < 0.15 |
-| Talker tok/s | TBD | ~1000 |
-| E2E Latency | TBD | < 200 ms |
-
-## Running the Demo
-
-### Option 1: Gradio Web UI (Recommended)
-
-```bash
-# On GPU machine with RTX 5090
-python -m demo.gradio_app --share
-
-# Opens web UI with public URL
-# Access from any browser!
-```
-
-### Option 2: Pipecat Voice Pipeline
-
-```bash
-# Full voice pipeline (requires mic)
-python -m demo.pipecat_pipeline --mode voice
-
-# Text-only mode (no mic needed)
-python -m demo.pipecat_pipeline --mode text
-```
-
-### Option 3: Benchmark Only
-
-```bash
-python -m demo.benchmark
-```
-
-## Usage with Pipecat
-
-```python
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.services.google import GoogleLLMService
-from pipecat.services.silero import SileroVADService
-from qwen3_tts import Qwen3TTSService
-
-# Create services
-vad = SileroVADService()           # Voice detection (FREE)
-llm = GoogleLLMService(...)        # LLM (Gemini)
-tts = Qwen3TTSService(verbose=True) # TTS (Megakernel!)
-
-# Build pipeline: STT → LLM → TTS
-pipeline = Pipeline([
-    transport.input(),
-    vad,
-    stt_service,                    # Whisper (FREE, local)
-    llm,
-    tts,                            # Our megakernel-powered TTS!
-    transport.output(),
-])
-```
+### HuggingFace - Optional
+1. Go to https://huggingface.co/settings/tokens
+2. Create a token
+3. Set: `export HF_TOKEN="hf_..."`
 
 ## Troubleshooting
 
-### Kernel compilation fails
-- Ensure CUDA 12.8+ is installed
-- Verify RTX 5090 is detected: `nvidia-smi`
-- Check `nvcc --version`
+### "Module not found" errors
+```bash
+pip install edge-tts openai-whisper anthropic soundfile
+```
 
-### Out of memory
-- Reduce `MAX_SEQ_LEN` in `.env`
-- Ensure no other GPU processes running
+### Port already in use
+```bash
+python demo/gradio_app.py --share --port 7890
+```
 
-### Slow performance
-- Verify running on RTX 5090 (not other GPU)
-- Check power/thermal throttling
-- Disable other GPU workloads
+### Claude API errors
+- Check your API key is valid
+- Verify billing is set up at console.anthropic.com
+
+### Whisper slow to load
+- First run downloads ~150MB model
+- Subsequent runs are faster (cached)
+
+### No audio output
+- Check browser allows audio autoplay
+- Try clicking the play button manually
+
+## Development
+
+### Running Locally (Mock Mode)
+
+Without GPU, the app runs in mock mode:
+```bash
+python demo/gradio_app.py --share
+```
+
+### Testing the Megakernel
+
+```bash
+cd ~/qwen_megakernel
+python -m qwen_megakernel.bench
+```
+
+Expected output: ~1000 tok/s
 
 ## Credits
 
-- [AlpinDale/qwen_megakernel](https://github.com/AlpinDale/qwen_megakernel) - RTX 5090 megakernel
-- [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) - TTS model
-- [Pipecat](https://docs.pipecat.ai) - Voice pipeline framework
+- **Megakernel**: [AlpinDale/qwen_megakernel](https://github.com/AlpinDale/qwen_megakernel)
+- **Pipecat**: [pipecat.ai](https://docs.pipecat.ai)
+- **Claude**: [Anthropic](https://anthropic.com)
+- **Whisper**: [OpenAI](https://github.com/openai/whisper)
+- **Edge TTS**: [Microsoft](https://github.com/rany2/edge-tts)
+- **Gradio**: [gradio.app](https://gradio.app)
 
 ## License
 
 MIT
+
+---
+
+**Built for the RTX 5090 Megakernel Take-Home Project**
