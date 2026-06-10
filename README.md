@@ -87,7 +87,6 @@ pip install edge-tts openai-whisper anthropic
 
 ```bash
 export ANTHROPIC_API_KEY="your_anthropic_api_key"
-export HF_TOKEN="your_huggingface_token"  # Optional
 ```
 
 ### 4. Run the Voice Agent
@@ -187,10 +186,9 @@ alpin/
 3. Generate API key
 4. Set: `export ANTHROPIC_API_KEY="sk-ant-..."`
 
-### HuggingFace - Optional
-1. Go to https://huggingface.co/settings/tokens
-2. Create a token
-3. Set: `export HF_TOKEN="hf_..."`
+### Other Services - FREE (No API Key Needed)
+- **Whisper STT**: Runs locally on GPU
+- **Edge TTS**: Microsoft's free TTS service
 
 ## Troubleshooting
 
