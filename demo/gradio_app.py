@@ -51,6 +51,19 @@ try:
 except ImportError:
     print("Warning: edge-tts not installed - pip install edge-tts")
 
+# Whisper for Speech-to-Text
+WHISPER_AVAILABLE = False
+whisper_model = None
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+    whisper_model = whisper.load_model("base")
+    print("✓ Whisper STT loaded (base model)")
+except ImportError:
+    print("Warning: whisper not installed - pip install openai-whisper")
+except Exception as e:
+    print(f"Warning: Failed to load Whisper: {e}")
+
 
 class VoiceAgent:
     """Simple voice agent with LLM + TTS."""
@@ -187,12 +200,11 @@ class VoiceAgent:
         
         sample_rate, audio_data = audio_input
         
-        # For now, we'll use a simple approach
-        # In production, this would use Whisper or browser STT
-        # The Gradio interface handles browser-based transcription
+        # Transcribe audio using Whisper
+        transcription = self._transcribe_audio(sample_rate, audio_data)
         
-        # Mock transcription (in real app, audio would be transcribed)
-        transcription = "[Voice input received - transcription requires Whisper]"
+        if not transcription or transcription.strip() == "":
+            transcription = "[Could not understand audio]"
         
         # Get LLM response
         response = self.get_llm_response(transcription)
@@ -202,10 +214,43 @@ class VoiceAgent:
         
         # Update history (dict format for Gradio 6.x)
         history = history or []
-        history.append({"role": "user", "content": transcription})
+        history.append({"role": "user", "content": f"🎤 {transcription}"})
         history.append({"role": "assistant", "content": response})
         
         return history, audio_result
+    
+    def _transcribe_audio(self, sample_rate: int, audio_data: np.ndarray) -> str:
+        """Transcribe audio using Whisper."""
+        if not WHISPER_AVAILABLE or whisper_model is None:
+            return "[Whisper not available]"
+        
+        try:
+            # Save audio to temp file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                temp_path = f.name
+            
+            # Ensure audio is float32 for Whisper
+            if audio_data.dtype == np.int16:
+                audio_float = audio_data.astype(np.float32) / 32768.0
+            else:
+                audio_float = audio_data.astype(np.float32)
+            
+            # Handle stereo to mono
+            if len(audio_float.shape) > 1:
+                audio_float = audio_float.mean(axis=1)
+            
+            sf.write(temp_path, audio_float, sample_rate)
+            
+            # Transcribe
+            result = whisper_model.transcribe(temp_path, language="en")
+            
+            # Clean up
+            os.unlink(temp_path)
+            
+            return result["text"].strip()
+        except Exception as e:
+            print(f"Transcription error: {e}")
+            return f"[Transcription error: {str(e)}]"
 
 
 def create_ui():
