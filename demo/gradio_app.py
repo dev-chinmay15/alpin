@@ -150,9 +150,9 @@ Assistant:"""
         # Generate speech
         audio = asyncio.run(self.generate_speech(response))
         
-        # Update history with new Gradio format
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": response})
+        # Update history (tuple format for Gradio compatibility)
+        history = history or []
+        history.append([message, response])
         
         # Return audio as tuple (sample_rate, audio_array)
         return "", history, (24000, audio)
@@ -177,9 +177,9 @@ Assistant:"""
         # Generate speech
         audio = asyncio.run(self.generate_speech(response))
         
-        # Update history with new Gradio format
-        history.append({"role": "user", "content": transcription})
-        history.append({"role": "assistant", "content": response})
+        # Update history (tuple format for Gradio compatibility)
+        history = history or []
+        history.append([transcription, response])
         
         return history, (24000, audio)
 
@@ -215,7 +215,6 @@ def create_ui():
         chatbot = gr.Chatbot(
             label="Conversation",
             height=400,
-            type="messages",
         )
         
         # Text input
