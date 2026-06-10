@@ -85,7 +85,7 @@ class VoiceAgent:
         
         try:
             response = self.llm.messages.create(
-                model="claude-3-haiku-20240307",
+                model="claude-3-5-sonnet-20241022",
                 max_tokens=150,
                 system="You are a helpful voice assistant. Keep responses concise (1-2 sentences).",
                 messages=[
