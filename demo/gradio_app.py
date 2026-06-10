@@ -15,6 +15,7 @@ Usage:
 import asyncio
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -24,22 +25,31 @@ load_dotenv()
 
 import gradio as gr
 import numpy as np
+import soundfile as sf
 
 # Check for optional dependencies
 TORCH_AVAILABLE = False
 ANTHROPIC_AVAILABLE = False
+EDGE_TTS_AVAILABLE = False
 
 try:
     import torch
     TORCH_AVAILABLE = True
 except ImportError:
-    print("Warning: torch not installed - TTS will use mock")
+    print("Warning: torch not installed")
 
 try:
     import anthropic
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     print("Warning: anthropic not installed")
+
+try:
+    import edge_tts
+    EDGE_TTS_AVAILABLE = True
+    print("✓ Edge TTS available")
+except ImportError:
+    print("Warning: edge-tts not installed - pip install edge-tts")
 
 
 class VoiceAgent:
@@ -96,23 +106,35 @@ class VoiceAgent:
         except Exception as e:
             return f"[Error] {str(e)}"
     
-    async def generate_speech(self, text: str) -> np.ndarray:
-        """Generate speech from text."""
-        if self.tts_engine:
+    async def generate_speech(self, text: str) -> tuple:
+        """Generate speech from text using Edge TTS."""
+        if EDGE_TTS_AVAILABLE:
             try:
-                audio_chunks = []
-                async for chunk in self.tts_engine.generate_streaming(text):
-                    # Convert bytes to numpy
-                    audio_array = np.frombuffer(chunk, dtype=np.int16)
-                    audio_chunks.append(audio_array)
+                # Use Edge TTS (Microsoft, free)
+                communicate = edge_tts.Communicate(text, "en-US-AriaNeural")
                 
-                if audio_chunks:
-                    return np.concatenate(audio_chunks)
+                # Save to temp file
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                    temp_path = f.name
+                
+                await communicate.save(temp_path)
+                
+                # Read the audio file
+                audio_data, sample_rate = sf.read(temp_path)
+                
+                # Convert to int16
+                if audio_data.dtype != np.int16:
+                    audio_data = (audio_data * 32767).astype(np.int16)
+                
+                # Clean up temp file
+                os.unlink(temp_path)
+                
+                return sample_rate, audio_data
             except Exception as e:
-                print(f"TTS Error: {e}")
+                print(f"Edge TTS Error: {e}")
         
-        # Mock audio - generate a simple tone
-        return self._generate_mock_audio(text)
+        # Fallback to mock audio
+        return 24000, self._generate_mock_audio(text)
     
     def _generate_mock_audio(self, text: str) -> np.ndarray:
         """Generate mock audio (sine wave) for testing."""
@@ -147,8 +169,8 @@ class VoiceAgent:
         # Get LLM response
         response = self.get_llm_response(message)
         
-        # Generate speech
-        audio = asyncio.run(self.generate_speech(response))
+        # Generate speech (returns sample_rate, audio_data)
+        audio_result = asyncio.run(self.generate_speech(response))
         
         # Update history (dict format for Gradio 6.x)
         history = history or []
@@ -156,7 +178,7 @@ class VoiceAgent:
         history.append({"role": "assistant", "content": response})
         
         # Return audio as tuple (sample_rate, audio_array)
-        return "", history, (24000, audio)
+        return "", history, audio_result
     
     def process_voice(self, audio_input, history: list) -> tuple:
         """Process voice input and return response with audio."""
@@ -175,15 +197,15 @@ class VoiceAgent:
         # Get LLM response
         response = self.get_llm_response(transcription)
         
-        # Generate speech
-        audio = asyncio.run(self.generate_speech(response))
+        # Generate speech (returns sample_rate, audio_data)
+        audio_result = asyncio.run(self.generate_speech(response))
         
         # Update history (dict format for Gradio 6.x)
         history = history or []
         history.append({"role": "user", "content": transcription})
         history.append({"role": "assistant", "content": response})
         
-        return history, (24000, audio)
+        return history, audio_result
 
 
 def create_ui():
