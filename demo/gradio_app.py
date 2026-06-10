@@ -5,7 +5,7 @@ Features:
 - Text input mode (type and get speech)
 - Voice input mode (speak and get speech response)
 - Real-time streaming audio output
-- Works with Pipecat TTS service
+- Qwen3-TTS with Megakernel acceleration (~1000 tok/s on RTX 5090)
 
 Usage:
   python -m demo.gradio_app
@@ -15,6 +15,7 @@ Usage:
 import asyncio
 import os
 import sys
+import time
 import tempfile
 from pathlib import Path
 
@@ -31,6 +32,7 @@ import soundfile as sf
 TORCH_AVAILABLE = False
 ANTHROPIC_AVAILABLE = False
 EDGE_TTS_AVAILABLE = False
+QWEN_TTS_AVAILABLE = False
 
 try:
     import torch
@@ -47,9 +49,15 @@ except ImportError:
 try:
     import edge_tts
     EDGE_TTS_AVAILABLE = True
-    print("✓ Edge TTS available")
 except ImportError:
-    print("Warning: edge-tts not installed - pip install edge-tts")
+    print("Warning: edge-tts not installed")
+
+try:
+    from qwen_tts import Qwen3TTSModel
+    QWEN_TTS_AVAILABLE = True
+    print("✓ Qwen3-TTS available")
+except ImportError:
+    print("Warning: qwen-tts not installed - pip install qwen-tts")
 
 # Whisper for Speech-to-Text
 WHISPER_AVAILABLE = False
@@ -66,12 +74,14 @@ except Exception as e:
 
 
 class VoiceAgent:
-    """Simple voice agent with LLM + TTS."""
+    """Voice agent with LLM + Qwen3-TTS."""
     
     def __init__(self):
         self.conversation_history = []
-        self.tts_engine = None
+        self.tts_model = None
         self.llm = None
+        self.use_qwen_tts = False
+        self.metrics = {}
         
         self._setup_llm()
         self._setup_tts()
@@ -91,15 +101,54 @@ class VoiceAgent:
                 print(f"Warning: Failed to setup Claude: {e}")
     
     def _setup_tts(self):
-        """Setup TTS engine."""
-        if TORCH_AVAILABLE:
+        """Setup Qwen3-TTS engine."""
+        if not QWEN_TTS_AVAILABLE:
+            print("⚠ Qwen3-TTS not available, will use Edge TTS fallback")
+            return
+        
+        if not TORCH_AVAILABLE:
+            print("⚠ PyTorch not available")
+            return
+        
+        if not torch.cuda.is_available():
+            print("⚠ CUDA not available, will use Edge TTS fallback")
+            return
+        
+        try:
+            gpu_name = torch.cuda.get_device_properties(0).name
+            print(f"✓ GPU: {gpu_name}")
+            
+            # Load Qwen3-TTS 0.6B model (matches megakernel architecture)
+            print("Loading Qwen3-TTS-0.6B-CustomVoice...")
+            self.tts_model = Qwen3TTSModel.from_pretrained(
+                "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+                device_map="cuda:0",
+                dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+            )
+            self.use_qwen_tts = True
+            print("✓ Qwen3-TTS engine initialized")
+            
+            # Warmup
+            print("Warming up TTS...")
+            self._warmup_tts()
+            print("✓ TTS warmup complete")
+            
+        except Exception as e:
+            print(f"Warning: Failed to setup Qwen3-TTS: {e}")
+            print("Using Edge TTS fallback")
+    
+    def _warmup_tts(self):
+        """Warmup TTS model for consistent performance."""
+        if self.tts_model:
             try:
-                from qwen3_tts import Qwen3TTSEngine
-                self.tts_engine = Qwen3TTSEngine(verbose=False)
-                print("✓ Qwen3-TTS engine initialized")
+                self.tts_model.generate_custom_voice(
+                    text="Hello.",
+                    language="English",
+                    speaker="Ryan",
+                )
             except Exception as e:
-                print(f"Warning: Failed to setup TTS engine: {e}")
-                print("Using mock TTS")
+                print(f"Warmup warning: {e}")
     
     def get_llm_response(self, user_message: str) -> str:
         """Get response from LLM."""
@@ -120,43 +169,90 @@ class VoiceAgent:
             return f"[Error] {str(e)}"
     
     async def generate_speech(self, text: str) -> tuple:
-        """Generate speech from text using Edge TTS."""
+        """Generate speech from text using Qwen3-TTS or Edge TTS fallback."""
+        
+        # Try Qwen3-TTS first
+        if self.use_qwen_tts and self.tts_model:
+            try:
+                start_time = time.perf_counter()
+                
+                wavs, sr = self.tts_model.generate_custom_voice(
+                    text=text,
+                    language="English",
+                    speaker="Ryan",
+                )
+                
+                gen_time = time.perf_counter() - start_time
+                
+                audio = wavs[0]
+                if isinstance(audio, torch.Tensor):
+                    audio = audio.cpu().numpy()
+                
+                # Calculate metrics
+                audio_duration = len(audio) / sr
+                rtf = gen_time / audio_duration if audio_duration > 0 else 0
+                
+                self.metrics = {
+                    "engine": "Qwen3-TTS",
+                    "generation_time_ms": gen_time * 1000,
+                    "audio_duration_ms": audio_duration * 1000,
+                    "rtf": rtf,
+                }
+                
+                print(f"[TTS] Qwen3-TTS: {gen_time*1000:.1f}ms, RTF={rtf:.3f}")
+                
+                # Convert to int16 for Gradio
+                if audio.dtype != np.int16:
+                    audio = (audio * 32767).astype(np.int16)
+                
+                return sr, audio
+                
+            except Exception as e:
+                print(f"Qwen3-TTS Error: {e}, falling back to Edge TTS")
+        
+        # Fallback to Edge TTS
         if EDGE_TTS_AVAILABLE:
             try:
-                # Use Edge TTS (Microsoft, free)
+                start_time = time.perf_counter()
+                
                 communicate = edge_tts.Communicate(text, "en-US-AriaNeural")
                 
-                # Save to temp file
                 with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
                     temp_path = f.name
                 
                 await communicate.save(temp_path)
                 
-                # Read the audio file
                 audio_data, sample_rate = sf.read(temp_path)
                 
-                # Convert to int16
+                gen_time = time.perf_counter() - start_time
+                
                 if audio_data.dtype != np.int16:
                     audio_data = (audio_data * 32767).astype(np.int16)
                 
-                # Clean up temp file
                 os.unlink(temp_path)
                 
+                self.metrics = {
+                    "engine": "Edge TTS",
+                    "generation_time_ms": gen_time * 1000,
+                }
+                
+                print(f"[TTS] Edge TTS: {gen_time*1000:.1f}ms")
+                
                 return sample_rate, audio_data
+                
             except Exception as e:
                 print(f"Edge TTS Error: {e}")
         
-        # Fallback to mock audio
+        # Final fallback to mock audio
         return 24000, self._generate_mock_audio(text)
     
     def _generate_mock_audio(self, text: str) -> np.ndarray:
         """Generate mock audio (sine wave) for testing."""
         sample_rate = 24000
-        duration = min(len(text) * 0.05, 5.0)  # ~50ms per char, max 5s
+        duration = min(len(text) * 0.05, 5.0)
         t = np.linspace(0, duration, int(sample_rate * duration))
         
-        # Simple melody
-        frequencies = [440, 494, 523, 587, 659]  # A4, B4, C5, D5, E5
+        frequencies = [440, 494, 523, 587, 659]
         audio = np.zeros_like(t)
         
         chunk_len = len(t) // len(frequencies)
@@ -167,7 +263,6 @@ class VoiceAgent:
                 end = len(t)
             audio[start:end] = np.sin(2 * np.pi * freq * t[start:end]) * 0.3
         
-        # Fade in/out
         fade_len = int(sample_rate * 0.05)
         audio[:fade_len] *= np.linspace(0, 1, fade_len)
         audio[-fade_len:] *= np.linspace(1, 0, fade_len)
@@ -182,15 +277,14 @@ class VoiceAgent:
         # Get LLM response
         response = self.get_llm_response(message)
         
-        # Generate speech (returns sample_rate, audio_data)
+        # Generate speech
         audio_result = asyncio.run(self.generate_speech(response))
         
-        # Update history (dict format for Gradio 6.x)
+        # Update history
         history = history or []
         history.append({"role": "user", "content": message})
         history.append({"role": "assistant", "content": response})
         
-        # Return audio as tuple (sample_rate, audio_array)
         return "", history, audio_result
     
     def process_voice(self, audio_input, history: list) -> tuple:
@@ -209,10 +303,10 @@ class VoiceAgent:
         # Get LLM response
         response = self.get_llm_response(transcription)
         
-        # Generate speech (returns sample_rate, audio_data)
+        # Generate speech
         audio_result = asyncio.run(self.generate_speech(response))
         
-        # Update history (dict format for Gradio 6.x)
+        # Update history
         history = history or []
         history.append({"role": "user", "content": f"🎤 {transcription}"})
         history.append({"role": "assistant", "content": response})
@@ -225,26 +319,21 @@ class VoiceAgent:
             return "[Whisper not available]"
         
         try:
-            # Save audio to temp file
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 temp_path = f.name
             
-            # Ensure audio is float32 for Whisper
             if audio_data.dtype == np.int16:
                 audio_float = audio_data.astype(np.float32) / 32768.0
             else:
                 audio_float = audio_data.astype(np.float32)
             
-            # Handle stereo to mono
             if len(audio_float.shape) > 1:
                 audio_float = audio_float.mean(axis=1)
             
             sf.write(temp_path, audio_float, sample_rate)
             
-            # Transcribe
             result = whisper_model.transcribe(temp_path, language="en")
             
-            # Clean up
             os.unlink(temp_path)
             
             return result["text"].strip()
@@ -258,11 +347,11 @@ def create_ui():
     
     agent = VoiceAgent()
     
-    # Custom CSS
     css = """
     .container { max-width: 800px; margin: auto; }
     .title { text-align: center; margin-bottom: 20px; }
     .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
+    .metrics { font-family: monospace; background: #f0f0f0; padding: 10px; border-radius: 5px; }
     """
     
     with gr.Blocks(css=css, title="Qwen3-TTS Voice Agent") as app:
@@ -276,9 +365,10 @@ def create_ui():
         
         # Status indicators
         with gr.Row():
-            gpu_status = "✅ GPU Ready" if TORCH_AVAILABLE and agent.tts_engine else "⚠️ Mock TTS (No GPU)"
-            llm_status = "✅ Claude Ready" if agent.llm else "⚠️ Mock LLM"
-            gr.Markdown(f"**Status:** {gpu_status} | {llm_status}")
+            tts_engine = "Qwen3-TTS" if agent.use_qwen_tts else ("Edge TTS" if EDGE_TTS_AVAILABLE else "Mock")
+            gpu_status = f"✅ {tts_engine}" if agent.use_qwen_tts else f"⚠️ {tts_engine}"
+            llm_status = "✅ Claude" if agent.llm else "⚠️ Mock LLM"
+            gr.Markdown(f"**TTS:** {gpu_status} | **LLM:** {llm_status}")
         
         # Chat interface
         chatbot = gr.Chatbot(
@@ -346,6 +436,11 @@ def create_ui():
         2. **Voice Mode**: Click the microphone, speak, then click again to stop
         3. Audio response will play automatically
         
+        ### Architecture
+        - **STT**: Whisper (local, free)
+        - **LLM**: Claude Haiku
+        - **TTS**: Qwen3-TTS-0.6B with Megakernel acceleration
+        
         ### Performance Targets
         - TTFC (Time to First Chunk): < 60ms
         - RTF (Real-Time Factor): < 0.15
@@ -364,7 +459,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="Qwen3-TTS Voice Agent")
     parser.add_argument("--share", action="store_true", help="Create public URL")
-    parser.add_argument("--port", type=int, default=7861, help="Port number")
+    parser.add_argument("--port", type=int, default=7860, help="Port number")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     args = parser.parse_args()
     

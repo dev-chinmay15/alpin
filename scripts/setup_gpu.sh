@@ -1,60 +1,91 @@
 #!/bin/bash
-# Setup script for RTX 5090 GPU machine
-# Run this after SSH-ing into your Vast.ai instance
+# GPU Setup Script for Qwen3-TTS Voice Agent
+# Run this on your Vast.ai GPU instance
 
 set -e
 
 echo "========================================"
-echo "Qwen3-TTS Megakernel Setup"
+echo "Qwen3-TTS Voice Agent - GPU Setup"
 echo "========================================"
 
-# Check GPU
-echo ""
-echo "Checking GPU..."
-nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
-echo ""
-
 # Check CUDA
-echo "Checking CUDA..."
-nvcc --version || echo "nvcc not found - will use PyTorch's CUDA"
-echo ""
-
-# Install system dependencies
-echo "Installing system dependencies..."
-apt-get update -qq
-apt-get install -y -qq libsndfile1 portaudio19-dev ffmpeg
-
-# Upgrade pip
-echo "Upgrading pip..."
-pip install --upgrade pip
-
-# Install requirements
-echo "Installing Python dependencies..."
-pip install -r requirements.txt
-
-# Clone megakernel if not present
-if [ ! -d "../qwen_megakernel" ]; then
-    echo "Cloning megakernel repository..."
-    git clone https://github.com/AlpinDale/qwen_megakernel.git ../qwen_megakernel
+if ! command -v nvidia-smi &> /dev/null; then
+    echo "ERROR: nvidia-smi not found. Is CUDA installed?"
+    exit 1
 fi
 
-# Test megakernel compilation
-echo ""
-echo "Testing megakernel compilation..."
-cd ../qwen_megakernel
-python -c "from qwen_megakernel.build import get_extension; print('Megakernel compiled successfully!')" || echo "Compilation failed - check CUDA setup"
-cd -
+echo "GPU Info:"
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
-# Run quick benchmark
+# Create conda environment
 echo ""
-echo "Running quick benchmark..."
+echo "Creating conda environment..."
+if ! command -v conda &> /dev/null; then
+    echo "Installing miniconda..."
+    wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+    bash miniconda.sh -b -p $HOME/miniconda
+    eval "$($HOME/miniconda/bin/conda shell.bash hook)"
+    rm miniconda.sh
+fi
+
+conda create -n qwen3-tts python=3.12 -y
+conda activate qwen3-tts
+
+# Install PyTorch
+echo ""
+echo "Installing PyTorch..."
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# Install project dependencies
+echo ""
+echo "Installing project dependencies..."
+pip install -r requirements.txt
+
+# Install Flash Attention
+echo ""
+echo "Installing Flash Attention..."
+pip install -U flash-attn --no-build-isolation
+
+# Clone and build megakernel
+echo ""
+echo "Setting up megakernel..."
+if [ ! -d "../qwen_megakernel" ]; then
+    cd ..
+    git clone https://github.com/AlpinDale/qwen_megakernel.git
+    cd qwen_megakernel
+    pip install -e .
+    cd ../qwen3-tts-pipecat
+else
+    echo "Megakernel already exists"
+fi
+
+# Verify installation
+echo ""
+echo "Verifying installation..."
 python -c "
 import torch
 print(f'PyTorch: {torch.__version__}')
 print(f'CUDA available: {torch.cuda.is_available()}')
 if torch.cuda.is_available():
     print(f'GPU: {torch.cuda.get_device_properties(0).name}')
-    print(f'CUDA version: {torch.version.cuda}')
+
+try:
+    from qwen_tts import Qwen3TTSModel
+    print('Qwen-TTS: OK')
+except:
+    print('Qwen-TTS: Not installed')
+
+try:
+    import anthropic
+    print('Anthropic: OK')
+except:
+    print('Anthropic: Not installed')
+
+try:
+    import whisper
+    print('Whisper: OK')
+except:
+    print('Whisper: Not installed')
 "
 
 echo ""
@@ -62,14 +93,7 @@ echo "========================================"
 echo "Setup complete!"
 echo "========================================"
 echo ""
-echo "Run options:"
-echo ""
-echo "  1. Gradio Web UI (recommended):"
-echo "     python -m demo.gradio_app --share"
-echo ""
-echo "  2. Pipecat Voice Pipeline:"
-echo "     python -m demo.pipecat_pipeline --mode text"
-echo ""
-echo "  3. Benchmark:"
-echo "     python -m demo.benchmark"
-echo ""
+echo "Next steps:"
+echo "1. Set your API key: export ANTHROPIC_API_KEY='your_key'"
+echo "2. Run the voice agent: python demo/gradio_app.py --share"
+echo "3. Run benchmark: python scripts/benchmark.py"

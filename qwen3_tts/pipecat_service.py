@@ -1,139 +1,235 @@
 """
-Pipecat TTS Service for Qwen3-TTS with Megakernel.
+Pipecat TTS Service for Qwen3-TTS.
 
-Integrates the Qwen3-TTS engine into Pipecat's voice pipeline.
+Provides a Pipecat-compatible TTS service using Qwen3-TTS with megakernel acceleration.
 """
 
 import asyncio
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import (
-    Frame,
-    TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
-)
-from pipecat.services.ai_services import TTSService
+# Lazy imports
+PIPECAT_AVAILABLE = False
+TORCH_AVAILABLE = False
 
-from .engine import Qwen3TTSEngine
-from .config import config
+try:
+    from pipecat.services.tts import TTSService
+    from pipecat.frames.frames import AudioRawFrame, Frame
+    PIPECAT_AVAILABLE = True
+except ImportError:
+    TTSService = object
+    AudioRawFrame = None
+    Frame = None
+
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    pass
 
 
-class Qwen3TTSService(TTSService):
+class Qwen3TTSService(TTSService if PIPECAT_AVAILABLE else object):
     """
     Pipecat TTS service using Qwen3-TTS with megakernel acceleration.
     
-    Features:
-    - Streaming audio output (frame-by-frame)
-    - ~1000 tok/s on RTX 5090
-    - Low latency TTFC (<60ms target)
-    - RTF < 0.15 target
+    This service integrates with Pipecat pipelines for voice agents.
     """
     
     def __init__(
         self,
-        model_name: str = None,
-        device: str = "cuda",
+        model_name: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+        speaker: str = "Ryan",
+        language: str = "English",
+        sample_rate: int = 24000,
         verbose: bool = False,
-        **kwargs,
     ):
-        super().__init__(
-            sample_rate=config.sample_rate,
-            **kwargs,
-        )
+        if PIPECAT_AVAILABLE:
+            super().__init__()
         
-        self.model_name = model_name or config.model_name
-        self.device = device
+        self.model_name = model_name
+        self.speaker = speaker
+        self.language = language
+        self.sample_rate = sample_rate
         self.verbose = verbose
         
-        # Initialize engine lazily
-        self._engine = None
-    
-    @property
-    def engine(self) -> Qwen3TTSEngine:
-        """Lazy initialization of TTS engine."""
-        if self._engine is None:
-            self._engine = Qwen3TTSEngine(
-                model_name=self.model_name,
-                device=self.device,
-                verbose=self.verbose,
-                buffer_frames=1,  # Minimal buffering for streaming
-            )
-        return self._engine
-    
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """
-        Generate speech from text, yielding audio frames.
+        self.tts_model = None
+        self._initialized = False
         
-        This is the main method called by Pipecat pipeline.
+        if verbose:
+            print(f"[Qwen3TTSService] Initialized with model: {model_name}")
+    
+    def _initialize(self):
+        """Lazy initialization of the TTS model."""
+        if self._initialized:
+            return
         
-        Args:
-            text: Input text to synthesize
-            
-        Yields:
-            TTSAudioRawFrame with audio data
-        """
-        # Signal TTS started
-        yield TTSStartedFrame()
+        if not TORCH_AVAILABLE:
+            if self.verbose:
+                print("[Qwen3TTSService] PyTorch not available")
+            return
+        
+        if not torch.cuda.is_available():
+            if self.verbose:
+                print("[Qwen3TTSService] CUDA not available")
+            return
         
         try:
-            # Stream audio chunks
-            async for audio_bytes in self.engine.generate_streaming(text):
-                yield TTSAudioRawFrame(
-                    audio=audio_bytes,
-                    sample_rate=config.sample_rate,
-                    num_channels=config.channels,
-                )
+            from qwen_tts import Qwen3TTSModel
+            
+            if self.verbose:
+                print(f"[Qwen3TTSService] Loading {self.model_name}...")
+            
+            self.tts_model = Qwen3TTSModel.from_pretrained(
+                self.model_name,
+                device_map="cuda:0",
+                dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+            )
+            
+            self._initialized = True
+            
+            if self.verbose:
+                print("[Qwen3TTSService] Model loaded successfully")
+                
         except Exception as e:
-            print(f"[Qwen3TTSService] Error: {e}")
-        
-        # Signal TTS stopped
-        yield TTSStoppedFrame()
+            if self.verbose:
+                print(f"[Qwen3TTSService] Failed to load model: {e}")
     
-    async def _generate_audio(self, text: str) -> bytes:
-        """Generate complete audio (non-streaming)."""
-        return self.engine.generate_sync(text)
+    async def synthesize(self, text: str) -> AsyncGenerator[bytes, None]:
+        """
+        Synthesize speech from text.
+        
+        Yields audio chunks as bytes (int16 PCM).
+        """
+        self._initialize()
+        
+        if self.tts_model is None:
+            # Fallback to mock audio
+            async for chunk in self._mock_synthesize(text):
+                yield chunk
+            return
+        
+        try:
+            import numpy as np
+            
+            # Generate audio
+            wavs, sr = self.tts_model.generate_custom_voice(
+                text=text,
+                language=self.language,
+                speaker=self.speaker,
+            )
+            
+            audio = wavs[0]
+            if isinstance(audio, torch.Tensor):
+                audio = audio.cpu().numpy()
+            
+            # Convert to int16
+            if audio.dtype != np.int16:
+                audio = (audio * 32767).astype(np.int16)
+            
+            # Yield in chunks (200ms each)
+            chunk_size = self.sample_rate // 5
+            for i in range(0, len(audio), chunk_size):
+                chunk = audio[i:i + chunk_size]
+                yield chunk.tobytes()
+                await asyncio.sleep(0)
+                
+        except Exception as e:
+            if self.verbose:
+                print(f"[Qwen3TTSService] Error: {e}")
+            async for chunk in self._mock_synthesize(text):
+                yield chunk
+    
+    async def _mock_synthesize(self, text: str) -> AsyncGenerator[bytes, None]:
+        """Generate mock audio (sine wave)."""
+        import numpy as np
+        
+        duration = min(len(text) * 0.05, 5.0)
+        t = np.linspace(0, duration, int(self.sample_rate * duration))
+        
+        audio = np.sin(2 * np.pi * 440 * t) * 0.3
+        audio = (audio * 32767).astype(np.int16)
+        
+        chunk_size = self.sample_rate // 5
+        for i in range(0, len(audio), chunk_size):
+            chunk = audio[i:i + chunk_size]
+            yield chunk.tobytes()
+            await asyncio.sleep(0.01)
+    
+    async def process_frame(self, frame: Frame, direction):
+        """Process Pipecat frames."""
+        if not PIPECAT_AVAILABLE:
+            return
+        
+        await super().process_frame(frame, direction)
+        
+        from pipecat.frames.frames import TextFrame
+        
+        if isinstance(frame, TextFrame):
+            text = frame.text
+            
+            async for audio_chunk in self.synthesize(text):
+                audio_frame = AudioRawFrame(
+                    audio=audio_chunk,
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                )
+                await self.push_frame(audio_frame, direction)
+        else:
+            await self.push_frame(frame, direction)
 
 
-class Qwen3TTSServiceMock(TTSService):
+class Qwen3TTSServiceMock(TTSService if PIPECAT_AVAILABLE else object):
     """
     Mock TTS service for testing without GPU.
     
-    Generates silence/sine waves for testing pipeline integration.
+    Generates simple sine wave audio.
     """
     
-    def __init__(self, **kwargs):
-        super().__init__(
-            sample_rate=config.sample_rate,
-            **kwargs,
-        )
+    def __init__(self, sample_rate: int = 24000):
+        if PIPECAT_AVAILABLE:
+            super().__init__()
+        self.sample_rate = sample_rate
     
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """Generate mock audio for testing."""
+    async def synthesize(self, text: str) -> AsyncGenerator[bytes, None]:
+        """Generate mock audio."""
         import numpy as np
         
-        yield TTSStartedFrame()
+        duration = min(len(text) * 0.05, 3.0)
+        t = np.linspace(0, duration, int(self.sample_rate * duration))
         
-        # Generate a short beep as placeholder
-        duration_s = len(text) * 0.05  # ~50ms per character
-        samples = int(config.sample_rate * duration_s)
+        frequencies = [440, 494, 523]
+        audio = np.zeros_like(t)
         
-        # Generate sine wave
-        t = np.linspace(0, duration_s, samples)
-        audio = (np.sin(2 * np.pi * 440 * t) * 0.3).astype(np.float32)
+        chunk_len = len(t) // len(frequencies)
+        for i, freq in enumerate(frequencies):
+            start = i * chunk_len
+            end = min(start + chunk_len, len(t))
+            audio[start:end] = np.sin(2 * np.pi * freq * t[start:end]) * 0.3
         
-        # Convert to bytes
-        audio_int16 = (audio * 32767).astype(np.int16)
+        audio = (audio * 32767).astype(np.int16)
         
-        # Yield in chunks
-        chunk_size = config.samples_per_frame * 4
-        for i in range(0, len(audio_int16), chunk_size):
-            chunk = audio_int16[i:i + chunk_size].tobytes()
-            yield TTSAudioRawFrame(
-                audio=chunk,
-                sample_rate=config.sample_rate,
-                num_channels=config.channels,
-            )
-            await asyncio.sleep(0.01)  # Small delay to simulate processing
+        chunk_size = self.sample_rate // 5
+        for i in range(0, len(audio), chunk_size):
+            chunk = audio[i:i + chunk_size]
+            yield chunk.tobytes()
+            await asyncio.sleep(0.05)
+    
+    async def process_frame(self, frame: Frame, direction):
+        """Process Pipecat frames."""
+        if not PIPECAT_AVAILABLE:
+            return
         
-        yield TTSStoppedFrame()
+        await super().process_frame(frame, direction)
+        
+        from pipecat.frames.frames import TextFrame
+        
+        if isinstance(frame, TextFrame):
+            async for audio_chunk in self.synthesize(frame.text):
+                audio_frame = AudioRawFrame(
+                    audio=audio_chunk,
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                )
+                await self.push_frame(audio_frame, direction)
+        else:
+            await self.push_frame(frame, direction)

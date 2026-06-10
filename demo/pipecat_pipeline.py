@@ -1,7 +1,7 @@
 """
 Full Pipecat Voice Pipeline with Qwen3-TTS.
 
-Pipeline: Mic → VAD → STT (Whisper) → LLM (Gemini) → TTS (Megakernel) → Speaker
+Pipeline: Mic → VAD → STT (Whisper) → LLM (Claude) → TTS (Qwen3-TTS) → Speaker
 
 This is the complete Pipecat integration as required by the task.
 
@@ -31,14 +31,24 @@ from pipecat.frames.frames import (
     EndFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor
-from pipecat.services.google import GoogleLLMService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioParams
 
 # VAD for voice activity detection (free, local)
 from pipecat.services.silero import SileroVADService
 
+# Anthropic LLM
+try:
+    from pipecat.services.anthropic import AnthropicLLMService
+    ANTHROPIC_PIPECAT_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_PIPECAT_AVAILABLE = False
+
 # Our TTS service
-from qwen3_tts.pipecat_service import Qwen3TTSService, Qwen3TTSServiceMock
+try:
+    from qwen3_tts.pipecat_service import Qwen3TTSService, Qwen3TTSServiceMock
+except ImportError:
+    Qwen3TTSService = None
+    Qwen3TTSServiceMock = None
 
 
 class TranscriptionLogger(FrameProcessor):
@@ -134,13 +144,14 @@ async def run_voice_pipeline():
     print("=" * 60)
     
     # Check API key
-    google_api_key = os.getenv("GOOGLE_API_KEY")
-    if not google_api_key:
-        print("ERROR: GOOGLE_API_KEY not set in .env")
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not anthropic_api_key:
+        print("ERROR: ANTHROPIC_API_KEY not set in .env")
+        print("Set it with: export ANTHROPIC_API_KEY='your_key'")
         return
     
     # Check for GPU
-    use_megakernel = os.getenv("USE_MEGAKERNEL", "true").lower() == "true"
+    use_qwen_tts = True
     gpu_available = False
     
     try:
@@ -155,10 +166,10 @@ async def run_voice_pipeline():
                 print(f"[GPU] Note: Megakernel optimized for RTX 5090")
         else:
             print("[GPU] No CUDA GPU - using mock TTS")
-            use_megakernel = False
+            use_qwen_tts = False
     except ImportError:
         print("[GPU] PyTorch not available - using mock TTS")
-        use_megakernel = False
+        use_qwen_tts = False
     
     print()
     
@@ -182,20 +193,27 @@ async def run_voice_pipeline():
     stt = SimpleSTT()
     print("[Init] ✓ Whisper STT (transcription)")
     
-    # LLM (Google Gemini)
-    llm = GoogleLLMService(
-        api_key=google_api_key,
-        model="gemini-1.5-flash",
-    )
-    print("[Init] ✓ Gemini LLM (conversation)")
-    
-    # TTS (our megakernel service!)
-    if use_megakernel and gpu_available:
-        tts = Qwen3TTSService(verbose=True)
-        print("[Init] ✓ Qwen3-TTS Megakernel (speech synthesis)")
+    # LLM (Anthropic Claude)
+    if ANTHROPIC_PIPECAT_AVAILABLE:
+        llm = AnthropicLLMService(
+            api_key=anthropic_api_key,
+            model="claude-haiku-4-5-20251001",
+        )
+        print("[Init] ✓ Claude LLM (conversation)")
     else:
+        print("[Init] ✗ Anthropic Pipecat service not available")
+        return
+    
+    # TTS (Qwen3-TTS with megakernel!)
+    if use_qwen_tts and gpu_available and Qwen3TTSService:
+        tts = Qwen3TTSService(verbose=True)
+        print("[Init] ✓ Qwen3-TTS (speech synthesis)")
+    elif Qwen3TTSServiceMock:
         tts = Qwen3TTSServiceMock()
         print("[Init] ✓ Mock TTS (no GPU)")
+    else:
+        print("[Init] ✗ TTS service not available")
+        return
     
     # Logging processors
     transcription_logger = TranscriptionLogger()
@@ -254,17 +272,17 @@ async def run_text_pipeline():
     print("Qwen3-TTS Text Pipeline (No Mic Required)")
     print("=" * 60)
     
-    google_api_key = os.getenv("GOOGLE_API_KEY")
-    if not google_api_key:
-        print("ERROR: GOOGLE_API_KEY not set")
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not anthropic_api_key:
+        print("ERROR: ANTHROPIC_API_KEY not set")
+        print("Set it with: export ANTHROPIC_API_KEY='your_key'")
         return
     
     # Setup LLM
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=google_api_key)
-        llm = genai.GenerativeModel('gemini-1.5-flash')
-        print("[Init] ✓ Gemini LLM")
+        import anthropic
+        llm = anthropic.Anthropic(api_key=anthropic_api_key)
+        print("[Init] ✓ Claude LLM")
     except Exception as e:
         print(f"[Init] LLM error: {e}")
         return
@@ -272,8 +290,9 @@ async def run_text_pipeline():
     # Setup TTS
     tts_engine = None
     try:
-        from qwen3_tts import Qwen3TTSEngine
-        tts_engine = Qwen3TTSEngine(verbose=False)
+        from qwen3_tts import MegakernelTTSEngine
+        tts_engine = MegakernelTTSEngine(verbose=False)
+        tts_engine.initialize()
         print("[Init] ✓ Qwen3-TTS Engine")
     except Exception as e:
         print(f"[Init] TTS not available: {e}")
@@ -295,33 +314,31 @@ async def run_text_pipeline():
                 continue
             
             # Get LLM response
-            response = llm.generate_content(
-                f"You are a helpful voice assistant. Keep responses brief.\n\nUser: {user_input}\nAssistant:"
+            response = llm.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=150,
+                system="You are a helpful voice assistant. Keep responses brief.",
+                messages=[{"role": "user", "content": user_input}]
             )
-            assistant_text = response.text.strip()
+            assistant_text = response.content[0].text.strip()
             print(f"Assistant: {assistant_text}")
             
             # Generate and play audio
             if tts_engine:
                 print("[Generating speech...]")
-                audio_chunks = []
-                async for chunk in tts_engine.generate_streaming(assistant_text):
-                    audio_chunks.append(chunk)
+                audio, metrics = tts_engine.generate(assistant_text)
                 
                 # Play audio
                 try:
                     import sounddevice as sd
                     import numpy as np
                     
-                    audio_bytes = b"".join(audio_chunks)
-                    audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
-                    audio_float = audio_array.astype(np.float32) / 32767.0
-                    
+                    audio_float = audio.astype(np.float32) / 32767.0
                     sd.play(audio_float, samplerate=24000)
                     sd.wait()
-                    print("[Audio complete]\n")
+                    print(f"[Audio complete - {metrics.total_time_ms:.1f}ms, RTF={metrics.rtf:.3f}]\n")
                 except ImportError:
-                    print(f"[Generated {len(audio_chunks)} chunks - sounddevice not installed]\n")
+                    print(f"[Generated audio - sounddevice not installed]\n")
             else:
                 print("[Mock TTS - no audio]\n")
                 

@@ -2,21 +2,28 @@
 Qwen3-TTS with Megakernel Acceleration
 
 This package provides a high-performance TTS engine using:
-- Megakernel-accelerated Talker model (~1000 tok/s on RTX 5090)
-- Code Predictor for residual codebooks
-- Streaming Speech Decoder
+- Qwen3-TTS (0.6B) for Text-to-Speech
+- Megakernel-accelerated decode (~1000 tok/s on RTX 5090)
+- Streaming audio output
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-# Lazy imports to avoid requiring torch/pipecat for basic usage
+# Lazy imports to avoid requiring torch/qwen-tts for basic usage
 def __getattr__(name):
-    if name == "Qwen3TTSEngine":
-        from .engine import Qwen3TTSEngine
-        return Qwen3TTSEngine
+    if name == "MegakernelTTSEngine":
+        from .megakernel_tts import MegakernelTTSEngine
+        return MegakernelTTSEngine
+    elif name == "create_tts_engine":
+        from .megakernel_tts import create_tts_engine
+        return create_tts_engine
+    elif name == "Qwen3TTSEngine":
+        # Alias for backward compatibility
+        from .megakernel_tts import MegakernelTTSEngine
+        return MegakernelTTSEngine
     elif name == "Qwen3TTSService":
         from .pipecat_service import Qwen3TTSService
         return Qwen3TTSService
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = ["Qwen3TTSEngine", "Qwen3TTSService"]
+__all__ = ["MegakernelTTSEngine", "create_tts_engine", "Qwen3TTSEngine", "Qwen3TTSService"]
