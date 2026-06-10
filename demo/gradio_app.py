@@ -150,9 +150,10 @@ Assistant:"""
         # Generate speech
         audio = asyncio.run(self.generate_speech(response))
         
-        # Update history (tuple format for Gradio compatibility)
+        # Update history (dict format for Gradio 6.x)
         history = history or []
-        history.append([message, response])
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": response})
         
         # Return audio as tuple (sample_rate, audio_array)
         return "", history, (24000, audio)
@@ -177,9 +178,10 @@ Assistant:"""
         # Generate speech
         audio = asyncio.run(self.generate_speech(response))
         
-        # Update history (tuple format for Gradio compatibility)
+        # Update history (dict format for Gradio 6.x)
         history = history or []
-        history.append([transcription, response])
+        history.append({"role": "user", "content": transcription})
+        history.append({"role": "assistant", "content": response})
         
         return history, (24000, audio)
 
