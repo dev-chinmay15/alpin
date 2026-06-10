@@ -27,7 +27,7 @@ import numpy as np
 
 # Check for optional dependencies
 TORCH_AVAILABLE = False
-GOOGLE_AVAILABLE = False
+ANTHROPIC_AVAILABLE = False
 
 try:
     import torch
@@ -36,10 +36,10 @@ except ImportError:
     print("Warning: torch not installed - TTS will use mock")
 
 try:
-    import google.generativeai as genai
-    GOOGLE_AVAILABLE = True
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
 except ImportError:
-    print("Warning: google-generativeai not installed")
+    print("Warning: anthropic not installed")
 
 
 class VoiceAgent:
@@ -54,19 +54,18 @@ class VoiceAgent:
         self._setup_tts()
     
     def _setup_llm(self):
-        """Setup Google Gemini LLM."""
-        api_key = os.getenv("GOOGLE_API_KEY")
+        """Setup Anthropic Claude LLM."""
+        api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
-            print("Warning: GOOGLE_API_KEY not set")
+            print("Warning: ANTHROPIC_API_KEY not set")
             return
         
-        if GOOGLE_AVAILABLE:
+        if ANTHROPIC_AVAILABLE:
             try:
-                genai.configure(api_key=api_key)
-                self.llm = genai.GenerativeModel('gemini-2.0-flash')
-                print("✓ Gemini LLM initialized")
+                self.llm = anthropic.Anthropic(api_key=api_key)
+                print("✓ Claude LLM initialized")
             except Exception as e:
-                print(f"Warning: Failed to setup Gemini: {e}")
+                print(f"Warning: Failed to setup Claude: {e}")
     
     def _setup_tts(self):
         """Setup TTS engine."""
@@ -85,14 +84,15 @@ class VoiceAgent:
             return f"[Mock LLM] You said: {user_message}"
         
         try:
-            # Add system context
-            prompt = f"""You are a helpful voice assistant. Keep responses concise (1-2 sentences).
-            
-User: {user_message}
-Assistant:"""
-            
-            response = self.llm.generate_content(prompt)
-            return response.text.strip()
+            response = self.llm.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=150,
+                system="You are a helpful voice assistant. Keep responses concise (1-2 sentences).",
+                messages=[
+                    {"role": "user", "content": user_message}
+                ]
+            )
+            return response.content[0].text.strip()
         except Exception as e:
             return f"[Error] {str(e)}"
     
@@ -210,7 +210,7 @@ def create_ui():
         # Status indicators
         with gr.Row():
             gpu_status = "✅ GPU Ready" if TORCH_AVAILABLE and agent.tts_engine else "⚠️ Mock TTS (No GPU)"
-            llm_status = "✅ Gemini Ready" if agent.llm else "⚠️ Mock LLM"
+            llm_status = "✅ Claude Ready" if agent.llm else "⚠️ Mock LLM"
             gr.Markdown(f"**Status:** {gpu_status} | {llm_status}")
         
         # Chat interface

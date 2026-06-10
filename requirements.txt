@@ -6,8 +6,8 @@ accelerate>=0.20.0
 # Pipecat voice framework
 pipecat-ai[google,silero,daily]>=0.0.40
 
-# Google Gemini LLM
-google-generativeai>=0.5.0
+# Anthropic Claude LLM
+anthropic>=0.25.0
 
 # Audio processing
 soundfile
