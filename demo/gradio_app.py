@@ -213,7 +213,6 @@ def create_ui():
         chatbot = gr.Chatbot(
             label="Conversation",
             height=400,
-            show_copy_button=True,
         )
         
         # Text input
