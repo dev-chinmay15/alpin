@@ -63,7 +63,7 @@ class VoiceAgent:
         if GOOGLE_AVAILABLE:
             try:
                 genai.configure(api_key=api_key)
-                self.llm = genai.GenerativeModel('gemini-1.5-flash')
+                self.llm = genai.GenerativeModel('gemini-2.0-flash')
                 print("✓ Gemini LLM initialized")
             except Exception as e:
                 print(f"Warning: Failed to setup Gemini: {e}")
