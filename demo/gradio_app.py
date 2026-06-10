@@ -150,8 +150,9 @@ Assistant:"""
         # Generate speech
         audio = asyncio.run(self.generate_speech(response))
         
-        # Update history
-        history.append((message, response))
+        # Update history with new Gradio format
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": response})
         
         # Return audio as tuple (sample_rate, audio_array)
         return "", history, (24000, audio)
@@ -176,8 +177,9 @@ Assistant:"""
         # Generate speech
         audio = asyncio.run(self.generate_speech(response))
         
-        # Update history
-        history.append((transcription, response))
+        # Update history with new Gradio format
+        history.append({"role": "user", "content": transcription})
+        history.append({"role": "assistant", "content": response})
         
         return history, (24000, audio)
 
@@ -213,6 +215,7 @@ def create_ui():
         chatbot = gr.Chatbot(
             label="Conversation",
             height=400,
+            type="messages",
         )
         
         # Text input
@@ -293,7 +296,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="Qwen3-TTS Voice Agent")
     parser.add_argument("--share", action="store_true", help="Create public URL")
-    parser.add_argument("--port", type=int, default=7860, help="Port number")
+    parser.add_argument("--port", type=int, default=7861, help="Port number")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     args = parser.parse_args()
     
