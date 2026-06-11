@@ -14,7 +14,7 @@ class TTSConfig:
     """Configuration for the TTS engine."""
     
     # Model settings
-    model_name: str = "Qwen/Qwen3-TTS"
+    model_name: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
     use_megakernel: bool = True
     max_seq_len: int = 2048
     
@@ -45,7 +45,7 @@ class TTSConfig:
     def from_env(cls) -> "TTSConfig":
         """Load configuration from environment variables."""
         return cls(
-            model_name=os.getenv("MODEL_NAME", "Qwen/Qwen3-TTS"),
+            model_name=os.getenv("MODEL_NAME", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"),
             use_megakernel=os.getenv("USE_MEGAKERNEL", "true").lower() == "true",
             max_seq_len=int(os.getenv("MAX_SEQ_LEN", "2048")),
             sample_rate=int(os.getenv("SAMPLE_RATE", "24000")),

@@ -1,6 +1,6 @@
 # Qwen3-TTS Voice Agent with RTX 5090 Megakernel
 
-A high-performance voice agent using **Qwen3-TTS** with **megakernel acceleration** on RTX 5090, achieving ~1000 tok/s decode speed.
+A high-performance voice agent using **Qwen3-TTS** with **megakernel acceleration** on RTX 5090, targeting ~1000 tok/s decode speed.
 
 ## Architecture
 
@@ -43,7 +43,7 @@ A high-performance voice agent using **Qwen3-TTS** with **megakernel acceleratio
 
 | Component | Implementation | Notes |
 |-----------|---------------|-------|
-| **STT** | Whisper (base) | Local, free, ~150ms latency |
+| **STT** | Whisper (base, optional) | Local, free, only needed for mic transcription |
 | **LLM** | Claude Haiku | Fast responses, low cost |
 | **TTS** | Qwen3-TTS-0.6B | Megakernel-accelerated |
 | **UI** | Gradio | Web interface with voice/text input |
@@ -88,9 +88,25 @@ export HF_TOKEN="your_token_here"
 # Run with Gradio UI
 python demo/gradio_app.py --share
 
+# Run decode server (prompt -> token stream)
+uvicorn qwen3_tts.server:app --host 0.0.0.0 --port 8000
+
 # Or run benchmark
 python scripts/benchmark.py
 ```
+
+## Dependency Profiles
+
+Use one of these setups depending on what you want to run:
+
+- **Minimal (recommended for take-home core path)**
+  - Megakernel decode + Qwen3-TTS + Pipecat + Gradio + decode server
+  - Install with `pip install -r requirements.txt`
+- **Optional STT addon**
+  - Install `openai-whisper` only if you need local microphone transcription
+  - Command: `pip install openai-whisper`
+
+`openai-whisper` is not required for the decode server or text-driven TTS path.
 
 ## Project Structure
 
@@ -101,7 +117,10 @@ qwen3-tts-pipecat/
 │   └── pipecat_pipeline.py # Pipecat voice pipeline
 ├── qwen3_tts/
 │   ├── __init__.py
-│   └── megakernel_tts.py   # Megakernel TTS integration
+│   ├── megakernel_tts.py   # Legacy wrapper + fallback path
+│   ├── engine.py           # Streaming TTS engine (Talker -> CodePredictor -> Decoder)
+│   ├── pipecat_service.py  # Pipecat TTS service using streaming engine
+│   └── server.py           # Decode API server (prompt -> token stream)
 ├── scripts/
 │   ├── benchmark.py        # Performance benchmarking
 │   └── setup_gpu.sh        # GPU setup script
@@ -185,6 +204,9 @@ python scripts/benchmark.py --tts-only --iterations 10
 | Long text | ~150ms | ~0.12 | 250+ characters |
 | Megakernel | - | - | ~1000 tok/s |
 
+> Note: `scripts/benchmark.py` reports TTFC only for streaming-capable paths.  
+> Non-streaming baseline paths report TTFC as N/A.
+
 ## Development
 
 ### Running Tests
@@ -216,8 +238,7 @@ python demo/gradio_app.py
 ### Fallback Mode
 
 If Qwen3-TTS is not available, the system falls back to:
-1. **Edge TTS** (Microsoft, free, cloud-based)
-2. **Mock audio** (sine wave for testing)
+1. **Mock audio** (sine wave for testing)
 
 ## References
 

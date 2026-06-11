@@ -2,7 +2,7 @@
 Voice Agent Demo using Qwen3-TTS with Pipecat.
 
 Complete voice pipeline:
-  User speaks -> STT -> LLM (Gemini) -> TTS (Qwen3 Megakernel) -> Audio output
+  User speaks -> STT -> LLM (Claude) -> TTS (Qwen3 Megakernel) -> Audio output
 
 Usage:
   python -m demo.voice_agent
@@ -24,7 +24,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
 from pipecat.frames.frames import LLMMessagesFrame, EndFrame
-from pipecat.services.google import GoogleLLMService
+from pipecat.services.anthropic import AnthropicLLMService
 from pipecat.transports.local.audio import LocalAudioTransport
 
 # Import our TTS service
@@ -40,9 +40,9 @@ async def main():
     print("=" * 60)
     
     # Check for API key
-    google_api_key = os.getenv("GOOGLE_API_KEY")
-    if not google_api_key:
-        print("ERROR: GOOGLE_API_KEY not set in .env")
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not anthropic_api_key:
+        print("ERROR: ANTHROPIC_API_KEY not set in .env")
         return
     
     # Check if we have GPU for megakernel
@@ -67,10 +67,10 @@ async def main():
     
     # Initialize services
     
-    # LLM - Google Gemini
-    llm = GoogleLLMService(
-        api_key=google_api_key,
-        model="gemini-1.5-flash",
+    # LLM - Anthropic Claude
+    llm = AnthropicLLMService(
+        api_key=anthropic_api_key,
+        model="claude-haiku-4-5-20251001",
     )
     
     # TTS - Qwen3 with Megakernel (or mock if no GPU)
@@ -170,7 +170,7 @@ async def run_full_pipeline():
     print("Starting full voice pipeline...")
     print("Speak into your microphone. Press Ctrl+C to stop.")
     
-    google_api_key = os.getenv("GOOGLE_API_KEY")
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
     
     # Transport for local audio I/O
     transport = LocalAudioTransport(
@@ -185,9 +185,9 @@ async def run_full_pipeline():
     vad = SileroVADService()
     
     # LLM
-    llm = GoogleLLMService(
-        api_key=google_api_key,
-        model="gemini-1.5-flash",
+    llm = AnthropicLLMService(
+        api_key=anthropic_api_key,
+        model="claude-haiku-4-5-20251001",
     )
     
     # TTS
@@ -197,7 +197,7 @@ async def run_full_pipeline():
     pipeline = Pipeline([
         transport.input(),
         vad,
-        # STT would go here
+        # TODO: plug STT service if running full mic pipeline
         llm,
         tts,
         transport.output(),

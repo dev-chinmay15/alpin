@@ -80,12 +80,6 @@ try:
     print('Anthropic: OK')
 except:
     print('Anthropic: Not installed')
-
-try:
-    import whisper
-    print('Whisper: OK')
-except:
-    print('Whisper: Not installed')
 "
 
 echo ""
@@ -96,4 +90,5 @@ echo ""
 echo "Next steps:"
 echo "1. Set your API key: export ANTHROPIC_API_KEY='your_key'"
 echo "2. Run the voice agent: python demo/gradio_app.py --share"
-echo "3. Run benchmark: python scripts/benchmark.py"
+echo "3. Run decode server: uvicorn qwen3_tts.server:app --host 0.0.0.0 --port 8000"
+echo "4. Run benchmark: python scripts/benchmark.py"

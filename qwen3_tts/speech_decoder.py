@@ -23,7 +23,7 @@ class SpeechDecoder:
     
     def __init__(
         self,
-        model_name: str = "Qwen/Qwen3-TTS",
+        model_name: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
         device: str = "cuda",
         verbose: bool = True,
     ):
@@ -141,7 +141,7 @@ class StreamingSpeechDecoder:
     
     def __init__(
         self,
-        model_name: str = "Qwen/Qwen3-TTS",
+        model_name: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
         device: str = "cuda",
         buffer_frames: int = 4,  # Buffer 4 frames for smoother streaming
     ):

@@ -18,12 +18,16 @@ def __getattr__(name):
         from .megakernel_tts import create_tts_engine
         return create_tts_engine
     elif name == "Qwen3TTSEngine":
-        # Alias for backward compatibility
-        from .megakernel_tts import MegakernelTTSEngine
-        return MegakernelTTSEngine
+        from .engine import Qwen3TTSEngine
+        return Qwen3TTSEngine
     elif name == "Qwen3TTSService":
         from .pipecat_service import Qwen3TTSService
         return Qwen3TTSService
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = ["MegakernelTTSEngine", "create_tts_engine", "Qwen3TTSEngine", "Qwen3TTSService"]
+__all__ = [
+    "MegakernelTTSEngine",
+    "create_tts_engine",
+    "Qwen3TTSEngine",
+    "Qwen3TTSService",
+]

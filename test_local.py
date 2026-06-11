@@ -86,11 +86,11 @@ def test_env():
     from dotenv import load_dotenv
     load_dotenv()
     
-    google_key = os.getenv("GOOGLE_API_KEY")
-    if google_key:
-        print(f"  GOOGLE_API_KEY: {google_key[:10]}...")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    if anthropic_key:
+        print(f"  ANTHROPIC_API_KEY: {anthropic_key[:10]}...")
     else:
-        print("  GOOGLE_API_KEY: Not set")
+        print("  ANTHROPIC_API_KEY: Not set")
     
     print("\nEnvironment OK!")
 

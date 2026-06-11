@@ -31,7 +31,6 @@ import soundfile as sf
 # Check for optional dependencies
 TORCH_AVAILABLE = False
 ANTHROPIC_AVAILABLE = False
-EDGE_TTS_AVAILABLE = False
 QWEN_TTS_AVAILABLE = False
 
 try:
@@ -45,12 +44,6 @@ try:
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     print("Warning: anthropic not installed")
-
-try:
-    import edge_tts
-    EDGE_TTS_AVAILABLE = True
-except ImportError:
-    print("Warning: edge-tts not installed")
 
 try:
     from qwen_tts import Qwen3TTSModel
@@ -103,7 +96,7 @@ class VoiceAgent:
     def _setup_tts(self):
         """Setup Qwen3-TTS engine."""
         if not QWEN_TTS_AVAILABLE:
-            print("⚠ Qwen3-TTS not available, will use Edge TTS fallback")
+            print("⚠ Qwen3-TTS not available, will use mock audio")
             return
         
         if not TORCH_AVAILABLE:
@@ -111,7 +104,7 @@ class VoiceAgent:
             return
         
         if not torch.cuda.is_available():
-            print("⚠ CUDA not available, will use Edge TTS fallback")
+            print("⚠ CUDA not available, will use mock audio")
             return
         
         try:
@@ -136,7 +129,7 @@ class VoiceAgent:
             
         except Exception as e:
             print(f"Warning: Failed to setup Qwen3-TTS: {e}")
-            print("Using Edge TTS fallback")
+            print("Using mock audio fallback")
     
     def _warmup_tts(self):
         """Warmup TTS model for consistent performance."""
@@ -169,7 +162,7 @@ class VoiceAgent:
             return f"[Error] {str(e)}"
     
     async def generate_speech(self, text: str) -> tuple:
-        """Generate speech from text using Qwen3-TTS or Edge TTS fallback."""
+        """Generate speech from text using Qwen3-TTS with mock fallback."""
         
         # Try Qwen3-TTS first
         if self.use_qwen_tts and self.tts_model:
@@ -208,40 +201,7 @@ class VoiceAgent:
                 return sr, audio
                 
             except Exception as e:
-                print(f"Qwen3-TTS Error: {e}, falling back to Edge TTS")
-        
-        # Fallback to Edge TTS
-        if EDGE_TTS_AVAILABLE:
-            try:
-                start_time = time.perf_counter()
-                
-                communicate = edge_tts.Communicate(text, "en-US-AriaNeural")
-                
-                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-                    temp_path = f.name
-                
-                await communicate.save(temp_path)
-                
-                audio_data, sample_rate = sf.read(temp_path)
-                
-                gen_time = time.perf_counter() - start_time
-                
-                if audio_data.dtype != np.int16:
-                    audio_data = (audio_data * 32767).astype(np.int16)
-                
-                os.unlink(temp_path)
-                
-                self.metrics = {
-                    "engine": "Edge TTS",
-                    "generation_time_ms": gen_time * 1000,
-                }
-                
-                print(f"[TTS] Edge TTS: {gen_time*1000:.1f}ms")
-                
-                return sample_rate, audio_data
-                
-            except Exception as e:
-                print(f"Edge TTS Error: {e}")
+                print(f"Qwen3-TTS Error: {e}, falling back to mock audio")
         
         # Final fallback to mock audio
         return 24000, self._generate_mock_audio(text)
@@ -365,7 +325,7 @@ def create_ui():
         
         # Status indicators
         with gr.Row():
-            tts_engine = "Qwen3-TTS" if agent.use_qwen_tts else ("Edge TTS" if EDGE_TTS_AVAILABLE else "Mock")
+            tts_engine = "Qwen3-TTS" if agent.use_qwen_tts else "Mock"
             gpu_status = f"✅ {tts_engine}" if agent.use_qwen_tts else f"⚠️ {tts_engine}"
             llm_status = "✅ Claude" if agent.llm else "⚠️ Mock LLM"
             gr.Markdown(f"**TTS:** {gpu_status} | **LLM:** {llm_status}")

@@ -163,7 +163,7 @@ def benchmark_qwen_tts(iterations: int = 5):
                 "text_length": len(text),
                 "avg_time_ms": avg_time * 1000,
                 "avg_rtf": avg_rtf,
-                "ttfc_ms": avg_time * 1000,  # Non-streaming
+                "ttfc_ms": None,  # Not measurable in non-streaming API
             }
             
             print(f"  Average: {avg_time*1000:.1f}ms, RTF={avg_rtf:.3f}")
@@ -180,67 +180,7 @@ def benchmark_qwen_tts(iterations: int = 5):
         return None
 
 
-def benchmark_edge_tts(iterations: int = 5):
-    """Benchmark Edge TTS for comparison."""
-    print("\n" + "=" * 60)
-    print("Edge TTS Benchmark (Baseline)")
-    print("=" * 60)
-    
-    try:
-        import asyncio
-        import edge_tts
-        import soundfile as sf
-        import tempfile
-        import os
-        
-        async def generate(text):
-            communicate = edge_tts.Communicate(text, "en-US-AriaNeural")
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-                temp_path = f.name
-            await communicate.save(temp_path)
-            audio, sr = sf.read(temp_path)
-            os.unlink(temp_path)
-            return audio, sr
-        
-        results = {}
-        
-        for name, text in TEST_TEXTS.items():
-            print(f"\n--- {name.upper()} TEXT ---")
-            
-            times = []
-            rtfs = []
-            
-            for i in range(iterations):
-                start = time.perf_counter()
-                audio, sr = asyncio.run(generate(text))
-                elapsed = time.perf_counter() - start
-                
-                audio_duration = len(audio) / sr
-                rtf = elapsed / audio_duration
-                
-                times.append(elapsed)
-                rtfs.append(rtf)
-                
-                print(f"  Run {i+1}: {elapsed*1000:.1f}ms, RTF={rtf:.3f}")
-            
-            avg_time = sum(times) / len(times)
-            avg_rtf = sum(rtfs) / len(rtfs)
-            
-            results[name] = {
-                "avg_time_ms": avg_time * 1000,
-                "avg_rtf": avg_rtf,
-            }
-            
-            print(f"  Average: {avg_time*1000:.1f}ms, RTF={avg_rtf:.3f}")
-        
-        return results
-        
-    except ImportError as e:
-        print(f"Edge TTS not available: {e}")
-        return None
-
-
-def print_summary(megakernel_results, qwen_tts_results, edge_tts_results):
+def print_summary(megakernel_results, qwen_tts_results):
     """Print benchmark summary."""
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
@@ -260,16 +200,12 @@ def print_summary(megakernel_results, qwen_tts_results, edge_tts_results):
     if qwen_tts_results:
         print("\n### Qwen3-TTS (0.6B) ###")
         for name, results in qwen_tts_results.items():
-            ttfc_pass = results['ttfc_ms'] < 60
             rtf_pass = results['avg_rtf'] < 0.15
-            print(f"  {name}: TTFC={results['ttfc_ms']:.1f}ms {'✓' if ttfc_pass else '✗'}, RTF={results['avg_rtf']:.3f} {'✓' if rtf_pass else '✗'}")
+            print(
+                f"  {name}: TTFC=N/A (non-streaming benchmark), "
+                f"RTF={results['avg_rtf']:.3f} {'✓' if rtf_pass else '✗'}"
+            )
     
-    if edge_tts_results:
-        print("\n### Edge TTS (Baseline) ###")
-        for name, results in edge_tts_results.items():
-            print(f"  {name}: {results['avg_time_ms']:.1f}ms, RTF={results['avg_rtf']:.3f}")
-
-
 def main():
     parser = argparse.ArgumentParser(description="Benchmark Qwen3-TTS")
     parser.add_argument("--iterations", type=int, default=5, help="Number of iterations")
@@ -287,16 +223,14 @@ def main():
     
     megakernel_results = None
     qwen_tts_results = None
-    edge_tts_results = None
     
     if not args.tts_only:
         megakernel_results = benchmark_megakernel()
     
     if not args.megakernel_only:
         qwen_tts_results = benchmark_qwen_tts(args.iterations)
-        edge_tts_results = benchmark_edge_tts(min(args.iterations, 3))
     
-    print_summary(megakernel_results, qwen_tts_results, edge_tts_results)
+    print_summary(megakernel_results, qwen_tts_results)
 
 
 if __name__ == "__main__":

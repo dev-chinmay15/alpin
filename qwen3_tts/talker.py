@@ -31,7 +31,7 @@ class MegakernelTalker:
     
     def __init__(
         self,
-        model_name: str = "Qwen/Qwen3-TTS",
+        model_name: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
         device: str = "cuda",
         verbose: bool = True,
     ):

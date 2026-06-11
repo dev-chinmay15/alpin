@@ -22,7 +22,7 @@ class CodePredictor:
     
     def __init__(
         self,
-        model_name: str = "Qwen/Qwen3-TTS",
+        model_name: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
         device: str = "cuda",
         verbose: bool = True,
     ):
@@ -146,7 +146,7 @@ class FastCodePredictor:
     where possible for lower latency.
     """
     
-    def __init__(self, model_name: str = "Qwen/Qwen3-TTS", device: str = "cuda"):
+    def __init__(self, model_name: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", device: str = "cuda"):
         self.predictor = CodePredictor(model_name, device, verbose=False)
     
     @torch.no_grad()
