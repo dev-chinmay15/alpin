@@ -1,252 +1,247 @@
-# Qwen3-TTS Voice Agent with RTX 5090 Megakernel
+# Qwen3-TTS with RTX 5090 Megakernel + Pipecat
 
-A high-performance voice agent using **Qwen3-TTS** with **megakernel acceleration** on RTX 5090, targeting ~1000 tok/s decode speed.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Voice Agent Pipeline                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   🎤 Voice Input                    💬 Text Input               │
-│        │                                  │                      │
-│        ▼                                  │                      │
-│   ┌─────────┐                             │                      │
-│   │ Whisper │ (Local STT, FREE)           │                      │
-│   │  (base) │                             │                      │
-│   └────┬────┘                             │                      │
-│        │                                  │                      │
-│        └──────────────┬───────────────────┘                      │
-│                       ▼                                          │
-│              ┌─────────────────┐                                 │
-│              │  Claude Haiku   │ (Conversational LLM)            │
-│              │   (Anthropic)   │                                 │
-│              └────────┬────────┘                                 │
-│                       │                                          │
-│                       ▼                                          │
-│   ┌─────────────────────────────────────────────────────────┐   │
-│   │              Qwen3-TTS-0.6B-CustomVoice                 │   │
-│   │  ┌─────────────────────────────────────────────────┐    │   │
-│   │  │         Megakernel-Accelerated Decoder          │    │   │
-│   │  │         (~1000 tok/s on RTX 5090)              │    │   │
-│   │  └─────────────────────────────────────────────────┘    │   │
-│   └────────────────────────┬────────────────────────────────┘   │
-│                            │                                     │
-│                            ▼                                     │
-│                    🔊 Audio Output                               │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## Components
-
-| Component | Implementation | Notes |
-|-----------|---------------|-------|
-| **STT** | Whisper (base, optional) | Local, free, only needed for mic transcription |
-| **LLM** | Claude Haiku | Fast responses, low cost |
-| **TTS** | Qwen3-TTS-0.6B | Megakernel-accelerated |
-| **UI** | Gradio | Web interface with voice/text input |
+High-performance Text-to-Speech using [AlpinDale's megakernel](https://github.com/AlpinDale/qwen_megakernel) for Qwen3-TTS, integrated into a [Pipecat](https://docs.pipecat.ai) voice pipeline.
 
 ## Performance Targets
 
 | Metric | Target | Description |
 |--------|--------|-------------|
-| **TTFC** | < 60ms | Time to first audio chunk |
-| **RTF** | < 0.15 | Real-time factor (gen_time / audio_duration) |
-| **Decode** | ~1000 tok/s | Megakernel token generation speed |
+| **TTFC** | < 60 ms | Time to first audio chunk |
+| **RTF** | < 0.15 | Real-time factor (generation time / audio duration) |
+| **Talker** | ~1000 tok/s | Megakernel decode speed on RTX 5090 |
 
-## Quick Start
+## Architecture
 
-### 1. Setup Environment (on GPU)
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                       Voice Pipeline                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  [User Speech] → [STT] → [LLM (Gemini)] → [TTS] → [Audio Output]    │
+│                                             │                        │
+│                                             ▼                        │
+│                    ┌─────────────────────────────────────────┐      │
+│                    │       Qwen3-TTS Engine                   │      │
+│                    ├─────────────────────────────────────────┤      │
+│                    │                                         │      │
+│                    │  ┌─────────────────────────────────┐   │      │
+│                    │  │ Talker (Megakernel) 🚀          │   │      │
+│                    │  │ • 28 transformer layers         │   │      │
+│                    │  │ • ~1000 tok/s on RTX 5090       │   │      │
+│                    │  │ • Outputs: Codebook-0 tokens    │   │      │
+│                    │  └─────────────────────────────────┘   │      │
+│                    │              │                          │      │
+│                    │              ▼                          │      │
+│                    │  ┌─────────────────────────────────┐   │      │
+│                    │  │ Code Predictor (PyTorch)        │   │      │
+│                    │  │ • 5 layers × 15 passes          │   │      │
+│                    │  │ • Outputs: Codebooks 1-15       │   │      │
+│                    │  └─────────────────────────────────┘   │      │
+│                    │              │                          │      │
+│                    │              ▼                          │      │
+│                    │  ┌─────────────────────────────────┐   │      │
+│                    │  │ Speech Decoder (ConvNet)        │   │      │
+│                    │  │ • Causal/streaming              │   │      │
+│                    │  │ • Outputs: 24kHz audio          │   │      │
+│                    │  └─────────────────────────────────┘   │      │
+│                    │              │                          │      │
+│                    │              ▼                          │      │
+│                    │      Streaming Audio Chunks             │      │
+│                    └─────────────────────────────────────────┘      │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Requirements
+
+- **GPU**: NVIDIA RTX 5090 (sm_120 / Blackwell)
+- **CUDA**: 12.8+
+- **Python**: 3.10+
+- **OS**: Linux (Ubuntu 22.04+ recommended)
+
+## Setup
+
+### 1. Clone Repository
 
 ```bash
-# Create conda environment
-conda create -n qwen3-tts python=3.12 -y
-conda activate qwen3-tts
+git clone <this-repo>
+cd qwen3-tts-pipecat
+```
 
-# Install dependencies
+### 2. Clone Megakernel
+
+```bash
+git clone https://github.com/AlpinDale/qwen_megakernel.git ../qwen_megakernel
+```
+
+### 3. Install Dependencies
+
+```bash
 pip install -r requirements.txt
-
-# Install Flash Attention (for better performance)
-pip install -U flash-attn --no-build-isolation
 ```
 
-### 2. Set API Keys
+### 4. Configure Environment
 
 ```bash
-# Claude LLM API key
-export ANTHROPIC_API_KEY="your_key_here"
-
-# HuggingFace token (for model download)
-export HF_TOKEN="your_token_here"
+cp .env.example .env
+# Edit .env with your API keys
 ```
 
-### 3. Run the Voice Agent
+### 5. Run Benchmark
 
 ```bash
-# Run with Gradio UI
-python demo/gradio_app.py --share
-
-# Run decode server (prompt -> token stream)
-uvicorn qwen3_tts.server:app --host 0.0.0.0 --port 8000
-
-# Or run benchmark
-python scripts/benchmark.py
+python -m demo.benchmark
 ```
 
-## Dependency Profiles
+### 6. Run Voice Agent Demo
 
-Use one of these setups depending on what you want to run:
-
-- **Minimal (recommended for take-home core path)**
-  - Megakernel decode + Qwen3-TTS + Pipecat + Gradio + decode server
-  - Install with `pip install -r requirements.txt`
-- **Optional STT addon**
-  - Install `openai-whisper` only if you need local microphone transcription
-  - Command: `pip install openai-whisper`
-
-`openai-whisper` is not required for the decode server or text-driven TTS path.
+```bash
+python -m demo.voice_agent
+```
 
 ## Project Structure
 
 ```
 qwen3-tts-pipecat/
-├── demo/
-│   ├── gradio_app.py       # Main Gradio web UI
-│   └── pipecat_pipeline.py # Pipecat voice pipeline
 ├── qwen3_tts/
-│   ├── __init__.py
-│   ├── megakernel_tts.py   # Legacy wrapper + fallback path
-│   ├── engine.py           # Streaming TTS engine (Talker -> CodePredictor -> Decoder)
-│   ├── pipecat_service.py  # Pipecat TTS service using streaming engine
-│   └── server.py           # Decode API server (prompt -> token stream)
-├── scripts/
-│   ├── benchmark.py        # Performance benchmarking
-│   └── setup_gpu.sh        # GPU setup script
-├── requirements.txt
-├── .env.example
-└── README.md
+│   ├── __init__.py         # Package init
+│   ├── config.py           # Configuration
+│   ├── talker.py           # Megakernel-accelerated Talker
+│   ├── code_predictor.py   # Code Predictor (codebooks 1-15)
+│   ├── speech_decoder.py   # Audio decoder
+│   ├── engine.py           # Main TTS engine
+│   └── pipecat_service.py  # Pipecat integration
+├── demo/
+│   ├── voice_agent.py      # Voice agent demo
+│   └── benchmark.py        # Performance benchmark
+├── .env.example            # Environment template
+├── requirements.txt        # Dependencies
+└── README.md               # This file
 ```
 
-## Megakernel Integration
+## Kernel Modifications
 
-The megakernel from [AlpinDale/qwen_megakernel](https://github.com/AlpinDale/qwen_megakernel) provides optimized CUDA kernels for Qwen3-0.6B decode:
+The megakernel was originally designed for Qwen3-0.6B text generation. For Qwen3-TTS:
 
-- **Architecture**: 128 persistent thread blocks × 512 threads
-- **Performance**: ~1000 tok/s decode (0.97 ms/step)
-- **Memory**: 71% of theoretical GDDR7 bandwidth utilization
+### Changes Made:
 
-The `Qwen3-TTS-12Hz-0.6B-CustomVoice` model uses the same Qwen3-0.6B backbone, making it compatible with the megakernel.
+1. **Vocab Size**: The Talker outputs audio codebook tokens (vocab ~2048) instead of text tokens (vocab 151936). This significantly reduces LM head computation.
 
-## Qwen3-TTS Model
+2. **Weight Loading**: Modified to load from `talker.model.layers.*` path structure in Qwen3-TTS instead of standard Qwen3 paths.
 
-Using the official [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice) from Hugging Face:
+3. **Output Head**: Uses `codec_head` instead of `lm_head` for predicting audio tokens.
 
-- **Model**: Qwen3-TTS-12Hz-0.6B-CustomVoice
-- **Size**: 0.6B parameters (BF16)
-- **Features**: 
-  - 10 languages support
-  - Multiple voice speakers
-  - Instruction-based voice control
-  - Streaming generation
-  - 97ms end-to-end latency (official spec)
+### Architecture Compatibility:
 
-### Available Speakers
+| Parameter | Qwen3-0.6B | Qwen3-TTS Talker |
+|-----------|------------|------------------|
+| Layers | 28 | 28 |
+| Hidden Size | 1024 | 1024 |
+| Q Heads | 16 | 16 |
+| KV Heads | 8 | 8 |
+| Head Dim | 128 | 128 |
+| MLP | SwiGLU (3072) | SwiGLU (3072) |
 
-| Speaker | Voice Type | Language |
-|---------|-----------|----------|
-| Ryan | Dynamic male | English |
-| Aiden | Sunny American male | English |
-| Vivian | Bright young female | Chinese |
-| Serena | Warm gentle female | Chinese |
+The architectures are compatible, allowing direct use of the megakernel.
 
-## GPU Setup (Vast.ai)
+## Streaming Implementation
 
-1. Rent an RTX 5090 instance on [Vast.ai](https://vast.ai)
-2. Select Ubuntu template with CUDA support
-3. Clone this repository and the megakernel:
+Audio is streamed frame-by-frame, not buffered:
+
+```python
+async for audio_chunk in engine.generate_streaming(text):
+    # Each chunk is ~80ms of audio (1920 samples @ 24kHz)
+    # Sent immediately to Pipecat output
+    yield TTSAudioRawFrame(audio=audio_chunk, ...)
+```
+
+This ensures minimal latency - audio starts playing as soon as the first frame is ready.
+
+## Performance Results
+
+_(To be filled after GPU testing)_
+
+| Metric | Measured | Target |
+|--------|----------|--------|
+| TTFC | TBD | < 60 ms |
+| RTF | TBD | < 0.15 |
+| Talker tok/s | TBD | ~1000 |
+| E2E Latency | TBD | < 200 ms |
+
+## Running the Demo
+
+### Option 1: Gradio Web UI (Recommended)
 
 ```bash
-# Clone project
-git clone https://github.com/your-repo/qwen3-tts-pipecat.git
-cd qwen3-tts-pipecat
+# On GPU machine with RTX 5090
+python -m demo.gradio_app --share
 
-# Clone megakernel
-git clone https://github.com/AlpinDale/qwen_megakernel.git
-
-# Build megakernel
-cd qwen_megakernel
-pip install -e .
+# Opens web UI with public URL
+# Access from any browser!
 ```
 
-## Benchmarking
-
-Run the benchmark suite to measure performance:
+### Option 2: Pipecat Voice Pipeline
 
 ```bash
-# Full benchmark
-python scripts/benchmark.py
+# Full voice pipeline (requires mic)
+python -m demo.pipecat_pipeline --mode voice
 
-# Megakernel only
-python scripts/benchmark.py --megakernel-only
-
-# TTS only
-python scripts/benchmark.py --tts-only --iterations 10
+# Text-only mode (no mic needed)
+python -m demo.pipecat_pipeline --mode text
 ```
 
-### Expected Results (RTX 5090)
-
-| Test | TTFC | RTF | Notes |
-|------|------|-----|-------|
-| Short text | ~40ms | ~0.08 | "Hello, how are you?" |
-| Medium text | ~80ms | ~0.10 | 100 characters |
-| Long text | ~150ms | ~0.12 | 250+ characters |
-| Megakernel | - | - | ~1000 tok/s |
-
-> Note: `scripts/benchmark.py` reports TTFC only for streaming-capable paths.  
-> Non-streaming baseline paths report TTFC as N/A.
-
-## Development
-
-### Running Tests
+### Option 3: Benchmark Only
 
 ```bash
-# Test TTS engine
-python -c "from qwen3_tts import MegakernelTTSEngine; e = MegakernelTTSEngine(); e.initialize()"
-
-# Test Gradio app locally (mock mode)
-python demo/gradio_app.py
+python -m demo.benchmark
 ```
 
-### Environment Variables
+## Usage with Pipecat
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | Claude API key |
-| `HF_TOKEN` | No | HuggingFace token for model download |
-| `CUDA_VISIBLE_DEVICES` | No | GPU device selection |
+```python
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.services.google import GoogleLLMService
+from pipecat.services.silero import SileroVADService
+from qwen3_tts import Qwen3TTSService
+
+# Create services
+vad = SileroVADService()           # Voice detection (FREE)
+llm = GoogleLLMService(...)        # LLM (Gemini)
+tts = Qwen3TTSService(verbose=True) # TTS (Megakernel!)
+
+# Build pipeline: STT → LLM → TTS
+pipeline = Pipeline([
+    transport.input(),
+    vad,
+    stt_service,                    # Whisper (FREE, local)
+    llm,
+    tts,                            # Our megakernel-powered TTS!
+    transport.output(),
+])
+```
 
 ## Troubleshooting
 
-### Common Issues
+### Kernel compilation fails
+- Ensure CUDA 12.8+ is installed
+- Verify RTX 5090 is detected: `nvidia-smi`
+- Check `nvcc --version`
 
-1. **CUDA out of memory**: Use 0.6B model instead of 1.7B
-2. **Flash Attention error**: Rebuild with `pip install flash-attn --no-build-isolation`
-3. **Model download fails**: Set `HF_TOKEN` environment variable
+### Out of memory
+- Reduce `MAX_SEQ_LEN` in `.env`
+- Ensure no other GPU processes running
 
-### Fallback Mode
+### Slow performance
+- Verify running on RTX 5090 (not other GPU)
+- Check power/thermal throttling
+- Disable other GPU workloads
 
-If Qwen3-TTS is not available, the system falls back to:
-1. **Mock audio** (sine wave for testing)
+## Credits
 
-## References
-
-- [Qwen3-TTS Technical Report](https://arxiv.org/abs/2601.15621)
-- [AlpinDale's Megakernel Blog](https://blog.alpindale.net/posts/5090_decode_optimization/)
-- [Megakernel Source](https://github.com/AlpinDale/qwen_megakernel)
-- [Pipecat Documentation](https://docs.pipecat.ai)
+- [AlpinDale/qwen_megakernel](https://github.com/AlpinDale/qwen_megakernel) - RTX 5090 megakernel
+- [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) - TTS model
+- [Pipecat](https://docs.pipecat.ai) - Voice pipeline framework
 
 ## License
 
-Apache 2.0 (same as Qwen3-TTS)
+MIT

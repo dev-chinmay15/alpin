@@ -3,17 +3,14 @@ torch>=2.0.0
 transformers>=4.40.0
 accelerate>=0.20.0
 
-# Qwen3-TTS (official package)
-qwen-tts
-
-# Flash Attention 2 (for faster inference)
-flash-attn
-
 # Pipecat voice framework
-pipecat-ai[silero,daily]>=0.0.40
+pipecat-ai[google,silero,daily]>=0.0.40
 
 # Anthropic Claude LLM
 anthropic>=0.25.0
+
+# Edge TTS (Microsoft, FREE)
+edge-tts
 
 # Audio processing
 soundfile
@@ -24,10 +21,20 @@ numpy
 gradio>=4.0.0
 
 # Async and networking
+aiohttp
+websockets
 python-dotenv
-fastapi
-uvicorn
 
 # CUDA compilation
 ninja
 triton>=2.2.0
+
+# Local STT (Whisper) - FREE!
+openai-whisper
+
+# Utilities
+tqdm
+rich
+
+# Optional: For benchmarking
+py-spy
